@@ -47,6 +47,7 @@ const BUILTIN_DOMAINS = [
 const DEFAULT_SOURCES = {
   wetest_enable: true,
   wetest_v4: "https://www.wetest.vip/page/cloudflare/address_v4.html",
+  wetest_v6_enable: true,
   wetest_v6: "https://www.wetest.vip/page/cloudflare/address_v6.html",
   github_enable: true,
   github_url: "https://raw.githubusercontent.com/qwer-search/bestip/refs/heads/main/kejilandbestip.txt",
@@ -107,7 +108,8 @@ async function handleIps(env) {
   const manual = await kvGetJSON(env, "manual", []);
   const builtin = BUILTIN_DOMAINS.map((d) => ({ ip: d.domain, port: 443, name: d.name || d.domain }));
   const fetched = await getFetched(env, false);
-  const merged = dedupe([...manual, ...builtin, ...fetched]).slice(0, 500);
+  // 先按 ip:port 去重，再保证 name 唯一（重名追加序号，v2board 展开节点时 name 必须唯一）
+  const merged = dedupeNames(dedupe([...manual, ...builtin, ...fetched])).slice(0, 500);
   return json({ success: true, count: merged.length, data: merged });
 }
 
@@ -135,7 +137,7 @@ async function handleAdmin(request, env) {
   switch (action) {
     case "source": {
       const next = { ...(await getSources(env)) };
-      for (const k of ["wetest_enable", "github_enable"]) {
+      for (const k of ["wetest_enable", "wetest_v6_enable", "github_enable"]) {
         if (body[k] !== undefined) next[k] = !!body[k];
       }
       for (const k of ["wetest_v4", "wetest_v6", "github_url"]) {
@@ -209,7 +211,7 @@ async function getFetched(env, force) {
   const jobs = [];
   if (s.wetest_enable) {
     if (s.wetest_v4) jobs.push(fetchWetest(s.wetest_v4).catch((e) => []));
-    if (s.wetest_v6) jobs.push(fetchWetest(s.wetest_v6).catch((e) => []));
+    if (s.wetest_v6_enable && s.wetest_v6) jobs.push(fetchWetest(s.wetest_v6).catch((e) => []));
   }
   if (s.github_enable && s.github_url) {
     jobs.push(fetchGithub(s.github_url).catch((e) => []));
@@ -315,6 +317,19 @@ function dedupe(arr) {
   return out;
 }
 
+/** 保证输出中 name 唯一：重名的追加 -2、-3… 序号 */
+function dedupeNames(arr) {
+  const counts = {};
+  const out = [];
+  for (const e of arr) {
+    const base = e.name || e.ip;
+    const n = (counts[base] || 0) + 1;
+    counts[base] = n;
+    out.push({ ...e, name: n === 1 ? base : base + "-" + n });
+  }
+  return out;
+}
+
 // ===================== KV / 响应工具 =====================
 
 async function kvGetJSON(env, key, fallback) {
@@ -389,6 +404,7 @@ const PAGE_HTML = `<!DOCTYPE html>
     <label class="chk"><input type="checkbox" id="wetest_enable"> 启用 wetest 拉取</label>
     <div class="lbl">wetest IPv4 地址</div>
     <input type="text" id="wetest_v4">
+    <label class="chk"><input type="checkbox" id="wetest_v6_enable"> 启用 wetest IPv6 拉取</label>
     <div class="lbl">wetest IPv6 地址</div>
     <input type="text" id="wetest_v6">
     <label class="chk"><input type="checkbox" id="github_enable"> 启用 GitHub 拉取</label>
@@ -452,6 +468,7 @@ async function load(){
     showMain();
     document.getElementById('wetest_enable').checked = !!d.sources.wetest_enable;
     document.getElementById('wetest_v4').value = d.sources.wetest_v4||'';
+    document.getElementById('wetest_v6_enable').checked = d.sources.wetest_v6_enable === undefined ? true : !!d.sources.wetest_v6_enable;
     document.getElementById('wetest_v6').value = d.sources.wetest_v6||'';
     document.getElementById('github_enable').checked = !!d.sources.github_enable;
     document.getElementById('github_url').value = d.sources.github_url||'';
@@ -478,6 +495,7 @@ async function saveSources(){
     await api('source', {
       wetest_enable: document.getElementById('wetest_enable').checked,
       wetest_v4: document.getElementById('wetest_v4').value.trim(),
+      wetest_v6_enable: document.getElementById('wetest_v6_enable').checked,
       wetest_v6: document.getElementById('wetest_v6').value.trim(),
       github_enable: document.getElementById('github_enable').checked,
       github_url: document.getElementById('github_url').value.trim()
