@@ -74,7 +74,9 @@ export default {
       }
     }
     if (path === "/") {
-      return new Response(PAGE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+      return new Response(PAGE_HTML, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
     }
     return json({ success: false, error: "not found" }, 404);
   },
@@ -464,10 +466,12 @@ function renderManual(list){
   if (!list.length){ tb.innerHTML='<tr><td colspan="4" class="empty">暂无手动条目</td></tr>'; return; }
   tb.innerHTML = list.map(function(e,i){
     return '<tr><td>'+esc(e.ip)+'</td><td>'+e.port+'</td><td>'+esc(e.name||'')+'</td>'+
-      '<td><button class="btn btn-danger" onclick="delOne('+i+',\''+esc(e.ip)+'\','+e.port+')">删</button></td></tr>';
+      '<td><button class="btn btn-danger" data-ip="'+esc(e.ip)+'" data-port="'+e.port+'" onclick="delOne(this)">删</button></td></tr>';
   }).join('');
 }
-function delOne(i, ip, port){ api('remove',{items:[{ip:ip,port:port}]}).then(function(){toast('已删除',true);load();}).catch(function(e){toast(e.message,false);}); }
+function delOne(btn){
+  api('remove',{items:[{ip:btn.dataset.ip, port:parseInt(btn.dataset.port,10)}]}).then(function(){toast('已删除',true);load();}).catch(function(e){toast(e.message,false);});
+}
 
 async function saveSources(){
   try {
