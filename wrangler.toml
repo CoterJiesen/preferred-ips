@@ -1,0 +1,12 @@
+name = "preferred-ips"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV 命名空间（绑定手动列表/拉取源配置/拉取缓存）
+# 创建：wrangler kv:namespace create PREFERRED_IPS
+[[kv_namespaces]]
+binding = "PREFERRED_IPS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# AUTH_KEY 用 secret 设置（不要写在仓库里）：
+#   wrangler secret put AUTH_KEY
