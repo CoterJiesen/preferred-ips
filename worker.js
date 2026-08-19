@@ -108,8 +108,8 @@ async function handleIps(env) {
   const manual = await kvGetJSON(env, "manual", []);
   const builtin = BUILTIN_DOMAINS.map((d) => ({ ip: d.domain, port: 443, name: d.name || d.domain }));
   const fetched = await getFetched(env, false);
-  // 先按 ip:port 去重，再保证 name 唯一（重名追加序号，v2board 展开节点时 name 必须唯一）
-  const merged = dedupeNames(dedupe([...manual, ...builtin, ...fetched])).slice(0, 500);
+  // 先按 ip:port 去重，再按 CFnew 规则命名并编号（v2board 展开节点时 name 必须唯一）
+  const merged = cfnewNaming(dedupe([...manual, ...builtin, ...fetched])).slice(0, 500);
   return json({ success: true, count: merged.length, data: merged });
 }
 
@@ -239,7 +239,7 @@ async function fetchWetest(url) {
       const isp = c[1].replace(/<.*?>/g, "").trim();
       const ip = c[2].trim();
       const colo = c[3] ? c[3].replace(/<.*?>/g, "").trim() : "";
-      out.push({ ip, port: 443, name: isp || colo || ip });
+      out.push({ ip, port: 443, isp, colo, name: isp || colo || ip });
     }
   }
   return out;
@@ -317,15 +317,42 @@ function dedupe(arr) {
   return out;
 }
 
-/** 保证输出中 name 唯一：重名的追加 -2、-3… 序号 */
-function dedupeNames(arr) {
-  const counts = {};
+/** 规范化名称：去括号/协议/路径，空白→下划线（对应 CFnew 处理值节点别名部分） */
+function cleanName(v, fallback) {
+  let s = String(v || "").trim();
+  if (!s || /^自定义优选-/i.test(s)) s = fallback;
+  s = s.replace(/^\[([^\]]+)\]$/, "$1").replace(/^https?:\/\//i, "").replace(/[/?#].*$/, "").replace(/\s+/g, "_");
+  return s || fallback;
+}
+
+/** 是否为 IP（IPv4 或含冒号的 IPv6） */
+function isIp(host) {
+  if (!host) return false;
+  return host.includes(":") || /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+}
+
+/**
+ * 按 CFnew 命名规则给整个池命名并编号：
+ *  IPv6 → IPv6优选；域名 → 优选域名；IPv4 → isp[-colo]（无 isp 用 IPv4优选）
+ *  每个基础名独立编号 -01、-02…（保证 name 唯一）
+ */
+function cfnewNaming(arr) {
+  const counters = {};
   const out = [];
   for (const e of arr) {
-    const base = e.name || e.ip;
-    const n = (counts[base] || 0) + 1;
-    counts[base] = n;
-    out.push({ ...e, name: n === 1 ? base : base + "-" + n });
+    const host = String(e.ip || "").trim().replace(/^\[([^\]]+)\]$/, "$1");
+    let base;
+    if (host.includes(":") && /^[0-9a-fA-F:.]+$/.test(host)) {
+      base = "IPv6优选";
+    } else if (!isIp(host)) {
+      base = "域名";
+    } else {
+      const isp = cleanName(e.isp || e.name, "IPv4优选");
+      const colo = cleanName(e.colo, "");
+      base = colo ? isp + "." + colo : isp;
+    }
+    counters[base] = (counters[base] || 0) + 1;
+    out.push({ ...e, name: base + "." + String(counters[base]).padStart(2, "0") });
   }
   return out;
 }
